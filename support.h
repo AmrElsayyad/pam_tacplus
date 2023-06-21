@@ -26,21 +26,40 @@
 
 #include <security/pam_modules.h>
 
+/* pam_tacplus command line options */
+#define PAM_TAC_DEBUG 0x01
+#define PAM_TAC_ACCT  0x02
+
+/* account on all specified servers */
+#define PAM_TAC_USE_FIRST_PASS 0x04
+#define PAM_TAC_TRY_FIRST_PASS 0x08
+
+/* accounting setting flag */
+#define ACCOUNTING_FLAG_LOCAL  0x10
+#define ACCOUNTING_FLAG_TACACS 0x20
+
+/* authorization setting flag */
+#define AUTHORIZATION_FLAG_LOCAL  0x40
+#define AUTHORIZATION_FLAG_TACACS 0x80
+
 typedef struct {
     struct addrinfo *addr;
-    const char *key;
+    char key[256];
 } tacplus_server_t;
 
 extern tacplus_server_t tac_srv[TAC_PLUS_MAXSERVERS];
 extern int tac_srv_no;
+extern char *__vrfname;
 
 extern char tac_service[64];
 extern char tac_protocol[64];
 extern char tac_prompt[64];
+extern struct addrinfo *tac_source_addr;
 
 int _pam_parse (int, const char **);
 unsigned long _resolve_name (char *);
 unsigned long _getserveraddr (char *serv);
+int validate_not_sshd_bad_pass(const char *pass);
 int tacacs_get_password (pam_handle_t *, int, int, char **);
 int converse (pam_handle_t *, int, const struct pam_message *, struct pam_response **);
 void _pam_log (int, const char *, ...);
@@ -48,6 +67,11 @@ void *_xcalloc (size_t);
 char *_pam_get_user(pam_handle_t *);
 char *_pam_get_terminal(pam_handle_t *);
 char *_pam_get_rhost(pam_handle_t *);
+
+/*
+ * Parse config file.
+ */
+int parse_config_file(const char *file);
 
 #endif  /* PAM_TACPLUS_SUPPORT_H */
 

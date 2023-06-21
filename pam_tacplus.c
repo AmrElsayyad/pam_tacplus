@@ -53,7 +53,6 @@ static tacplus_server_t active_server;
 /* accounting task identifier */
 static short int task_id = 0;
 
-
 /* Helper functions */
 int _pam_send_account(int tac_fd, int type, const char *user, char *tty,
     char *r_addr, char *cmd) {
@@ -175,7 +174,7 @@ int _pam_account(pam_handle_t *pamh, int argc, const char **argv,
 
     status = PAM_SESSION_ERR;
     for(srv_i = 0; srv_i < tac_srv_no; srv_i++) {
-        tac_fd = tac_connect_single(tac_srv[srv_i].addr, tac_srv[srv_i].key, NULL, tac_timeout);
+        tac_fd = tac_connect_single(tac_srv[srv_i].addr, tac_srv[srv_i].key, tac_source_addr, tac_timeout, __vrfname);
         if (tac_fd < 0) {
             _pam_log(LOG_WARNING, "%s: error sending %s (fd)",
                 __FUNCTION__, typemsg);
@@ -249,6 +248,13 @@ int pam_sm_authenticate (pam_handle_t * pamh, int flags,
         return PAM_CRED_INSUFFICIENT;
     }
 
+    if (validate_not_sshd_bad_pass(pass) != PAM_SUCCESS) {
+        syslog(LOG_ERR, "auth fail: Password incorrect");
+        memset(pass, 0, strlen (pass));
+        free(pass);
+        return PAM_AUTH_ERR;
+    }
+
     retval = pam_set_item (pamh, PAM_AUTHTOK, pass);
     if (retval != PAM_SUCCESS) {
         _pam_log(LOG_ERR, "unable to set password");
@@ -274,9 +280,9 @@ int pam_sm_authenticate (pam_handle_t * pamh, int flags,
         if (ctrl & PAM_TAC_DEBUG)
             syslog(LOG_DEBUG, "%s: trying srv %d", __FUNCTION__, srv_i );
 
-        tac_fd = tac_connect_single(tac_srv[srv_i].addr, tac_srv[srv_i].key, NULL, tac_timeout);
+        tac_fd = tac_connect_single(tac_srv[srv_i].addr, tac_srv[srv_i].key, tac_source_addr, tac_timeout, __vrfname);
         if (tac_fd < 0) {
-            _pam_log(LOG_ERR, "connection failed srv %d: %m", srv_i);
+            _pam_log(LOG_ERR, "%s: connection to srv %d failed", __FUNCTION__, srv_i);
             continue;
         }
         if (tac_authen_send(tac_fd, user, pass, tty, r_addr, TAC_PLUS_AUTHEN_LOGIN) < 0) {
@@ -321,7 +327,8 @@ int pam_sm_authenticate (pam_handle_t * pamh, int flags,
                     status = PAM_SUCCESS;
                     communicating = 0;
                     active_server.addr = tac_srv[srv_i].addr;
-                    active_server.key = tac_srv[srv_i].key;
+                    /* copy secret to key */
+                    snprintf(active_server.key, sizeof(active_server.key), "%s", tac_srv[srv_i].key);
 
                     if (ctrl & PAM_TAC_DEBUG)
                         syslog(LOG_DEBUG, "%s: active srv %d", __FUNCTION__, srv_i);
@@ -481,7 +488,7 @@ int pam_sm_authenticate (pam_handle_t * pamh, int flags,
         syslog(LOG_DEBUG, "%s: exit with pam status: %d", __FUNCTION__, status);
 
     if (NULL != pass) {
-        bzero(pass, strlen (pass));
+        memset(pass, 0, strlen (pass));
         free(pass);
         pass = NULL;
     }
@@ -577,7 +584,7 @@ int pam_sm_acct_mgmt (pam_handle_t * pamh, int flags,
     if(tac_protocol[0] != '\0')
       tac_add_attrib(&attr, "protocol", tac_protocol);
 
-    tac_fd = tac_connect_single(active_server.addr, active_server.key, NULL, tac_timeout);
+    tac_fd = tac_connect_single(active_server.addr, active_server.key, tac_source_addr, tac_timeout, __vrfname);
     if(tac_fd < 0) {
         _pam_log (LOG_ERR, "TACACS+ server unavailable");
         if(arep.msg != NULL)
@@ -760,7 +767,7 @@ int pam_sm_chauthtok(pam_handle_t * pamh, int flags,
         if (ctrl & PAM_TAC_DEBUG)
             syslog(LOG_DEBUG, "%s: trying srv %d", __FUNCTION__, srv_i );
 
-        tac_fd = tac_connect_single(tac_srv[srv_i].addr, tac_srv[srv_i].key, NULL, tac_timeout);
+        tac_fd = tac_connect_single(tac_srv[srv_i].addr, tac_srv[srv_i].key, tac_source_addr, tac_timeout, __vrfname);
         if (tac_fd < 0) {
             _pam_log(LOG_ERR, "connection failed srv %d: %m", srv_i);
             continue;
@@ -818,7 +825,8 @@ int pam_sm_chauthtok(pam_handle_t * pamh, int flags,
                     communicating = 0;
 
                     active_server.addr = tac_srv[srv_i].addr;
-                    active_server.key = tac_srv[srv_i].key;
+                    /* copy secret to key */
+                    snprintf(active_server.key, sizeof(active_server.key), "%s", tac_srv[srv_i].key);
 
                     if (ctrl & PAM_TAC_DEBUG)
                         syslog(LOG_DEBUG, "%s: active srv %d", __FUNCTION__, srv_i);
@@ -977,7 +985,7 @@ finish:
         syslog(LOG_DEBUG, "%s: exit with pam status: %d", __FUNCTION__, status);
 
     if (NULL != pass) {
-        bzero(pass, strlen(pass));
+        memset(pass, 0, strlen(pass));
         free(pass);
         pass = NULL;
     }
